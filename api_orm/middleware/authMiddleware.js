@@ -1,10 +1,8 @@
 // middleware/authMiddleware.js
 const jwt = require("jsonwebtoken");
 const { jwtSecret } = require("../config/jwt");
-const pool = require("../config/db");
+const { User } = require("../models");
 
-// Funções middleware não precisam de try-catch se usarem `next(error)` para passar para o manipulador global
-// No entanto, para consistência com a remoção de catchAsync, os erros aqui serão passados com next(error) explicitamente.
 const protect = async (req, res, next) => {
   try {
     let token;
@@ -44,15 +42,14 @@ const protect = async (req, res, next) => {
         error.status = "fail";
         return next(error);
       }
-      return next(err); // Outros erros de JWT para o manipulador global
+      return next(err);
     }
 
-    const userResult = await pool.query(
-      "SELECT id, nome, email FROM usuarios WHERE id = $1",
-      [decoded.id]
-    );
+    const user = await User.findByPk(decoded.id, {
+      attributes: ["id", "nome", "email"],
+    });
 
-    if (userResult.rows.length === 0) {
+    if (!user) {
       const error = new Error(
         "O usuário pertencente a este token não existe mais."
       );
@@ -61,22 +58,26 @@ const protect = async (req, res, next) => {
       return next(error);
     }
 
-    req.user = userResult.rows[0];
+    // Converter para objeto simples se necessário
+    req.user = user.toJSON();
     next();
   } catch (err) {
-    next(err); // Captura qualquer erro inesperado no middleware e passa para o manipulador global
+    next(err);
   }
 };
 
-const restrictTo = (req, res, next) => {
-  // Esta função não é assíncrona, então não precisa de try-catch
-  if (!req.user || !roles.includes(req.user.role)) {
-    const error = new Error("Você não tem permissão para realizar esta ação.");
-    error.statusCode = 403;
-    error.status = "fail";
-    return next(error);
-  }
-  next();
+const restrictTo = (...roles) => {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      const error = new Error(
+        "Você não tem permissão para realizar esta ação."
+      );
+      error.statusCode = 403;
+      error.status = "fail";
+      return next(error);
+    }
+    next();
+  };
 };
 
 module.exports = {
